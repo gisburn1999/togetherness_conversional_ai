@@ -1,9 +1,15 @@
+import json
 import sqlite3
 import os
 
 
+
+
 class DatabaseManager:
     def __init__(self , db_path="recordings.db"):
+
+        self.conn = sqlite3.connect(db_path)
+        #self.conn = None
         self.db_path = db_path
         self.setup_db()
 
@@ -16,12 +22,6 @@ class DatabaseManager:
     def setup_db(self):
         conn = self.connect()
         cursor = conn.cursor()
-        try:
-            cursor.execute("ALTER TABLE recordings ADD COLUMN length INT;")
-        except sqlite3.OperationalError:
-                # Column already exists
-
-            pass
 
         # recordings table
         cursor.execute("""
@@ -66,8 +66,137 @@ class DatabaseManager:
             );
         """)
 
+        #speaker_profile table
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS speaker_profiles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                recording_id INTEGER NOT NULL,
+                conversation_tone TEXT,
+                speaker_styles TEXT, -- store JSON string
+                emotional_intensity_score INTEGER,
+                language_complexity TEXT,
+                style_tags TEXT, -- store JSON string
+                overall_temperature REAL,
+                max_token_recommendation INTEGER,
+                raw_json TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            """)
+
+        # speaker profile table v2
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS speaker_profile_entries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            recording_id INTEGER NOT NULL,
+            speaker_name TEXT NOT NULL,
+            tone TEXT,
+            style TEXT,
+            language_level TEXT,
+            audience_fit TEXT,
+            emotional_intensity TEXT,
+            recommendation_style TEXT,
+            raw_json TEXT, -- optional backup
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
 
 
+    def analyze_speaker_profile_and_save_entries(self , temp=0.7):
+        db = DatabaseManager()
+
+        messages = [
+            {
+                "role":    "system" ,
+                "content": (
+                    "You are an AI trained to profile speakers based on their communication style in couple dialogues. "
+                    "You return a structured JSON with separate speaker entries."
+                )
+            } ,
+            {
+                "role":    "user" ,
+                "content": (
+                    "Analyze each speaker's tone, style, emotional intensity, language level, audience fit, and "
+                    "recommendation style for approaching them.\n\n"
+                    "If the dialogue uses names (e.g., “Alex:”), extract and use them. Otherwise use 'Speaker A' and 'Speaker B'. "
+                    "If you think you understood a name but are unsure, format it like: 'Speaker A (possibly Jana)'.\n\n"
+                    "Return only JSON like this:\n\n"
+                    "{\n"
+                    "  \"speakers\": {\n"
+                    "    \"Speaker A\": {\n"
+                    "      \"tone\": \"...\",\n"
+                    "      \"style\": \"...\",\n"
+                    "      \"language_level\": \"...\",\n"
+                    "      \"audience_fit\": \"...\",\n"
+                    "      \"emotional_intensity\": \"...\",\n"
+                    "      \"recommendation_style\": \"...\"\n"
+                    "    },\n"
+                    "    \"Speaker B\": { ... }\n"
+                    "  }\n"
+                    "}\n\n"
+                    "Conversation transcript:\n"
+                )
+            } ,
+            {
+                "role":    "user" ,
+                "content": self.content
+            }
+        ]
+
+        response = open_ai_client.chat.completions.create(
+            model=self.model_open_ai ,
+            messages=messages ,
+            temperature=temp ,
+            max_tokens=500 ,
+        )
+
+        try:
+            profile_data = json.loads(response.choices[0].message.content)
+            speakers = profile_data.get("speakers" , {})
+        except json.JSONDecodeError:
+            print("❌ Failed to parse JSON from response.")
+            return
+
+        # Save to new table
+        db.save_speaker_entries(self.record_id , speakers)
+
+        print(f"✅ Saved {len(speakers)} speaker profiles for recording {self.record_id}.")
+
+
+
+    def save_speaker_entries(self , recording_id , speakers_dict):
+        conn = self.connect()
+        cursor = conn.cursor()
+
+        for name , profile in speakers_dict.items():
+            cursor.execute(
+                """
+                INSERT INTO speaker_profile_entries (
+                    recording_id,
+                    speaker_name,
+                    tone,
+                    style,
+                    language_level,
+                    audience_fit,
+                    emotional_intensity,
+                    recommendation_style,
+                    raw_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """ , (
+                    recording_id ,
+                    name ,
+                    profile.get("tone") ,
+                    profile.get("style") ,
+                    profile.get("language_level") ,
+                    profile.get("audience_fit") ,
+                    profile.get("emotional_intensity") ,
+                    profile.get("recommendation_style") ,
+                    json.dumps(profile)  # backup mini JSON
+                )
+            )
+
+        conn.commit()
+        conn.close()
 
 
     def get_or_insert_recording(self , filepath):
@@ -116,7 +245,7 @@ class DatabaseManager:
         return cursor.fetchone()
 
 
-    def update_missing_lengths(self):
+    def update_missing_lengths(self): # helping function
         #helper function to update the DB - obsolete
         conn = self.connect()
         cursor = conn.cursor()
@@ -198,3 +327,127 @@ class DatabaseManager:
             )
         conn.commit()
         conn.close()
+
+
+    def save_speaker_profile(
+            self ,
+            recording_id ,
+            conversation_tone ,
+            speaker_styles ,
+            emotional_intensity_score ,
+            language_complexity ,
+            style_tags ,
+            overall_temperature ,
+            max_token_recommendation ,
+            raw_json
+    ):
+        """
+        Save refined speaker profile analysis to the database.
+
+        :param recording_id: int – ID of the associated recording
+        :param conversation_tone: str – Overall tone of the dialogue
+        :param speaker_styles: str (JSON) – Describes each speaker's communication style
+        :param emotional_intensity_score: int – Emotional heat score (1–10)
+        :param language_complexity: str – low / medium / high
+        :param style_tags: str (JSON) – Array of short descriptive tags
+        :param overall_temperature: float – Suggested OpenAI temp (0.3–1.0)
+        :param max_token_recommendation: int – Suggested output token cap for next step
+        :param raw_json: str – Full raw JSON response from OpenAI
+        """
+        conn = self.connect()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            INSERT INTO speaker_profiles (
+                recording_id,
+                conversation_tone,
+                speaker_styles,
+                emotional_intensity_score,
+                language_complexity,
+                style_tags,
+                overall_temperature,
+                max_token_recommendation,
+                raw_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """ ,
+            (
+                recording_id ,
+                conversation_tone ,
+                speaker_styles ,
+                emotional_intensity_score ,
+                language_complexity ,
+                style_tags ,
+                overall_temperature ,
+                max_token_recommendation ,
+                raw_json
+            )
+        )
+
+        conn.commit()
+        conn.close()
+
+
+    def save_speaker_profile_old(self , recording_id , profile_data):
+        """
+        Save speaker profile analysis to the database.
+
+        :param recording_id: int – ID of the associated recording
+        :param profile_data: dict – Parsed profile output from OpenAI
+        """
+        conn = self.connect()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            INSERT INTO speaker_profiles (
+                recording_id,
+                tone,
+                style,
+                language_level,
+                audience_fit,
+                emotional_intensity,
+                recommendation_style,
+                raw_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """ , (
+                recording_id ,
+                profile_data.get("tone") ,
+                profile_data.get("style") ,
+                profile_data.get("language_level") ,
+                profile_data.get("audience_fit") ,
+                profile_data.get("emotional_intensity") ,
+                profile_data.get("recommendation_style") ,
+                json.dumps(profile_data)  # raw backup
+            )
+            )
+
+        conn.commit()
+        conn.close()
+
+
+    def get_speaker_profile(self , recording_id):
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT tone, style, language_level, audience_fit, emotional_intensity, recommendation_style
+            FROM speaker_profiles
+            WHERE recording_id = ?
+            ORDER BY created_at DESC
+            LIMIT 1
+        """ , (recording_id ,)
+            )
+        row = cursor.fetchone()
+        if row:
+            return {
+                "tone":                 row[0] ,
+                "style":                row[1] ,
+                "language_level":       row[2] ,
+                "audience_fit":         row[3] ,
+                "emotional_intensity":  row[4] ,
+                "recommendation_style": row[5]
+            }
+        return None
+
+
+

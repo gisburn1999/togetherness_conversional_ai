@@ -1,7 +1,7 @@
 """Quickstart
 Install the openai package using the following pip command:
 pip install openai"""
-
+import json
 import os
 import textwrap
 from dotenv import load_dotenv
@@ -69,7 +69,7 @@ class Ai_Analyse():
                 {
                     "role":    "system" ,
                     "content": (
-                        "You are an AI trained to analyze couple dialogues from natural conversations. "
+                        "You act as an AI trained to analyze couple dialogues from natural conversations. "
                         "Your job is to detect emotional and communication patterns, extract names if available, and provide helpful relationship insights."
                     )
                 } ,
@@ -275,12 +275,295 @@ class Ai_Analyse():
         print("Generated text:\n" , wrapped_text)
 
 
-    def test_open_file(): # test function
-        app = Ai_Analyse()
-        app.open_existing_file("transcripts/20250605_211200_recording.txt")
-        if app.content:
-            print("Loaded content:")
-            print(app.content[:300])
-        else:
-            print("Failed to load content.")
+    def analysis_global_adaptive(self , temp=0.8):
+        db = DatabaseManager()
+
+        profile = db.get_speaker_profile(self.record_id)
+        profile_summary = ""
+        if profile:
+            profile_summary = (
+                f"Based on the speaker profile, the tone is '{profile['tone']}', "
+                f"style is '{profile['style']}', "
+                f"language level is '{profile['language_level']}', "
+                f"audience fit is '{profile['audience_fit']}', "
+                f"emotional intensity is '{profile['emotional_intensity']}', "
+                f"and the recommended feedback style is '{profile['recommendation_style']}'.\n\n"
+            )
+
+        messages = [
+            {"role":    "system" ,
+             "content": "You are an AI trained to analyze couple dialogues from natural conversations."} ,
+            {"role":    "user" ,
+             "content": (
+                 "Here is a conversation transcript between two people. "
+                 "Please analyze and output in this exact format, replacing Speaker A and Speaker B with actual names if mentioned. "
+                 "If no names found, use Speaker A and Speaker B.\n\n"
+                 f"{profile_summary}"  # Inject the profile info here
+                 "Speaker A Problems (or [Name]):\n"
+                 "- List the main emotional or communication problems this person shows.\n\n"
+                 "Speaker B Problems (or [Name]):\n"
+                 "- List the main emotional or communication problems this person shows.\n\n"
+                 "Shared Problems:\n"
+                 "- List problems that affect both or their relationship.\n\n"
+                 "Conclusions & Explanation:\n"
+                 "- Summarize what is happening beneath the surface and what could help resolve their conflict.\n\n"
+                 "Please keep your answer concise but detailed enough for understanding.\n\n"
+                 "Transcript:\n"
+             )
+             } ,
+            {"role": "user" , "content": self.content}
+        ]
+
+        response = open_ai_client.chat.completions.create(
+            model=self.model_open_ai ,
+            messages=messages ,
+            temperature=temp ,
+            max_tokens=600
+        )
+
+        text = response.choices[0].message.content
+        tokens_used = response.usage.total_tokens
+
+        # Save analysis
+        db.save_analysis(
+            recording_id=self.record_id ,
+            analysis_type="global_adaptive_analysis" ,
+            model=self.model_open_ai ,
+            temp=temp ,
+            analysis_file=text ,
+            token=tokens_used
+        )
+
+        print(text)
+
+
+    def analyze_speaker_profile_and_save_entries(self , temp=0.7):
+        db = DatabaseManager()
+
+        messages = [
+            {
+                "role":    "system" ,
+                "content": (
+                    "You are an AI trained to profile speakers based on their communication style in couple dialogues. "
+                    "You return a structured JSON with separate speaker entries."
+                )
+            } ,
+            {
+                "role":    "user" ,
+                "content": (
+    "You are an AI that analyzes couple conversations.\n\n"
+    
+    "Your task is to identify each speaker’s tone, style, language level, audience fit, emotional intensity, and recommended communication style.\n\n"
+    
+    "➡️ If the conversation uses names (e.g., “Alex:”), extract and use them. Otherwise, default to 'Speaker A' and 'Speaker B'. "
+    "If you’re unsure about a name, format like: 'Speaker A (possibly Jana)'.\n\n"
+    
+    "🚫 Do not explain your analysis. Do not use full sentences. Just output the final result as clean JSON.\n\n"
+    
+    "✅ Return only the following JSON structure **exactly**, raw JSON only, without markdown or formatting. with no additional text before or after:\n"
+    
+    "```json\n"
+    "{\n"
+    "  \"speakers\": {\n"
+    "    \"Speaker A\": {\n"
+    "      \"tone\": \"...\",\n"
+    "      \"style\": \"...\",\n"
+    "      \"language_level\": \"...\",\n"
+    "      \"audience_fit\": \"...\",\n"
+    "      \"emotional_intensity\": \"...\",\n"
+    "      \"recommendation_style\": \"...\"\n"
+    "    },\n"
+    "    \"Speaker B\": {\n"
+    "      \"tone\": \"...\",\n"
+    "      \"style\": \"...\",\n"
+    "      \"language_level\": \"...\",\n"
+    "      \"audience_fit\": \"...\",\n"
+    "      \"emotional_intensity\": \"...\",\n"
+    "      \"recommendation_style\": \"...\"\n"
+    "    }\n"
+    "  }\n"
+    "}\n"
+    "```\n\n"
+
+    "Conversation transcript:\n"
+)
+
+
+            } ,
+            {
+                "role":    "user" ,
+                "content": self.content
+            }
+        ]
+
+        response = open_ai_client.chat.completions.create(
+            model=self.model_open_ai ,
+            messages=messages ,
+            temperature=temp ,
+            max_tokens=500 ,
+        )
+
+        profile_text = response.choices[0].message.content
+
+        # 👇 Print raw output before parsing
+        print("🔎 RAW RESPONSE FROM OPENAI:\n" , profile_text)
+
+        try:
+            profile_data = json.loads(profile_text)
+            speakers = profile_data.get("speakers" , {})
+            print("✅ Parsed speakers:\n" , speakers)
+        except json.JSONDecodeError as e:
+            print("❌ Failed to parse JSON from response.")
+            print("📛 Error:" , e)
+
+        # Save to new table
+        db.save_speaker_entries(self.record_id , speakers)
+
+        print(f"✅ Saved {len(speakers)} speaker profiles for recording {self.record_id}.")
+
+
+    def analyze_relationship_dynamics(speaker_profiles: dict , temp: float = 0.65 , max_tokens: int = 500):
+        import openai
+        import json
+
+        open_ai_client = openai  # Ensure openai is set up outside this function
+
+        prompt_prefix = (
+            "You are an expert in relationship psychology and conversational dynamics.\n\n"
+            "Given the following speaker communication profiles, generate a relationship-focused analysis for EACH speaker.\n\n"
+            "For each speaker, output:\n"
+            "- relationship_mindset: a short phrase describing their likely mindset or emotional position\n"
+            "- core_needs: 2–3 needs this person is likely expressing or lacking\n"
+            "- communication_risks: what could go wrong in a conversation with them\n"
+            "- recommendation: how to best approach or respond to this person\n\n"
+            "Use clear, concise language. Output as valid JSON only — no markdown, no formatting, no extra text.\n\n"
+            "Input:\n"
+        )
+
+        formatted_json = json.dumps({"speakers": speaker_profiles} , indent=2)
+        full_prompt = prompt_prefix + formatted_json + "\n\nOutput format:\n" + json.dumps(
+            {
+                "Speaker A": {
+                    "relationship_mindset": "..." ,
+                    "core_needs":           "..." ,
+                    "communication_risks":  "..." ,
+                    "recommendation":       "..."
+                } ,
+                "Speaker B": {
+                    "relationship_mindset": "..." ,
+                    "core_needs":           "..." ,
+                    "communication_risks":  "..." ,
+                    "recommendation":       "..."
+                }
+            } , indent=2
+        )
+
+        messages = [
+            {"role":    "system" ,
+             "content": "You are a helpful assistant that analyzes communication in relationships."} ,
+            {"role": "user" , "content": full_prompt}
+        ]
+
+        try:
+            response = open_ai_client.ChatCompletion.create(
+                model="gpt-4" ,
+                messages=messages ,
+                temperature=temp ,
+                max_tokens=max_tokens ,
+            )
+            output_text = response.choices[0].message["content"]
+            print("🔍 Step 2 RAW OUTPUT:\n" , output_text)
+
+            try:
+                result = json.loads(output_text)
+            except json.JSONDecodeError:
+                print("❌ JSON parse failed.")
+                return {}
+
+            return result
+
+        except Exception as e:
+            print("🔥 Error calling OpenAI API:" , e)
+            return {}
+
+
+    def analyze_speaker_profile(self , temp=0.7):
+        db = DatabaseManager()
+
+        messages = [
+            {
+                "role":    "system" ,
+                "content": (
+                    "You are an AI trained to profile speakers based on their communication style in couple dialogues."
+                ) ,
+            } ,
+            {
+                "role":    "user" ,
+                "content": (
+                    "Analyze the communication style of both speakers in the following couple dialogue.\n\n"
+                    "For each speaker, return a short profile including:\n"
+                    "- tone\n"
+                    "- style\n"
+                    "- language level\n"
+                    "- audience fit\n"
+                    "- emotional intensity\n"
+                    "- recommendation style\n\n"
+                    "Use this JSON format:\n"
+                    "{\n"
+                    "  \"speakers\": {\n"
+                    "    \"SpeakerName1\": {\n"
+                    "      \"tone\": \"...\",\n"
+                    "      \"style\": \"...\",\n"
+                    "      \"language_level\": \"...\",\n"
+                    "      \"audience_fit\": \"...\",\n"
+                    "      \"emotional_intensity\": \"...\",\n"
+                    "      \"recommendation_style\": \"...\"\n"
+                    "    },\n"
+                    "    \"SpeakerName2\": { ... }\n"
+                    "  }\n"
+                    "}\n\n"
+                    "If the dialogue includes names (e.g., 'Alex:'), use those names as keys. If not, use 'Partner A' and 'Partner B'. "
+                    "If you're unsure but a name might be mentioned (e.g., 'Jana?'), return a name like: 'Partner A (possibly Jana?)'.\n\n"
+                    "Only return the raw JSON. No explanations.\n\n"
+                    "Dialogue transcript:\n"
+                ) ,
+            } ,
+            {
+                "role":    "user" ,
+                "content": self.content
+            } ,
+        ]
+
+        response = open_ai_client.chat.completions.create(
+            model=self.model_open_ai ,
+            messages=messages ,
+            temperature=temp ,
+            max_tokens=600 ,
+        )
+
+        profile_text = response.choices[0].message.content.strip()
+
+        # Safe JSON parsing
+        try:
+            profile_data = json.loads(profile_text)
+        except json.JSONDecodeError:
+            print("⚠️ Failed to parse JSON. Raw response:")
+            print(profile_text)
+            profile_data = {}
+
+        # Save into updated DB schema
+        db.save_speaker_profile(
+            recording_id=self.record_id ,
+            conversation_tone=None ,  # optional to fill in later
+            speaker_styles=json.dumps(profile_data.get("speakers")) ,
+            emotional_intensity_score=None ,
+            language_complexity=None ,
+            style_tags=None ,
+            overall_temperature=None ,
+            max_token_recommendation=None ,
+            raw_json=json.dumps(profile_data) ,
+        )
+
+        print("✅ Speaker profile saved for recording" , self.record_id)
+
 

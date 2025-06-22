@@ -1,6 +1,8 @@
 from analyse_with_ai import Ai_Analyse
 from voice_recording import VoiceApp
 from save_data import DatabaseManager
+import json
+
 save = DatabaseManager()
 app = VoiceApp()
 
@@ -11,7 +13,7 @@ def main_menue():
           "\n1. Record a sound file and transcribe\n"
           "2. analysis_global_master ---> all in one prompt\n"
           "3. analysis_global_first_try\n"
-          "4. Name the speaker GPT mini\n"
+          "4. Analyse in 2 steps\n"
           "5. GROQ Test\n"
           "q for quit\n"
           "\nInterim Helper menue:\n"
@@ -42,26 +44,28 @@ def main_menue():
                 else:
                     print("Transcript not available.")
                 #app.analysis_global_first_try()
-
-            case "4": #name the speaker
+        #
+            case "4": #2step analyse
+                if app.transcript_text:
+                    ai = Ai_Analyse(record_id=app.record_id , content=app.transcript_text)
+                    #ai.analyze_speaker_profile() #old analyse def
+                    ai.analyze_speaker_profile_and_save_entries() #new improved version
+                else:
+                    print("No transcript available. Please record or load a file first.")
+            case "5":
                 if app.transcript_text:
                     ai = Ai_Analyse(record_id=app.record_id , content=app.transcript_text)
                     ai.name_the_speaker_ai()
                 else:
                     print("No transcript available. Please record or load a file first.")
-            case "5":  # or whatever number you assign for GROQ analysis
-                if app.transcript_text:
-                    ai = Ai_Analyse(record_id=app.record_id , content=app.transcript_text)
-                    ai.basic_groq_analysing()
-                else:
-                    print("No transcript loaded. Please load or record one first.")
+
             case "i1":
                 pass
             case "6":
-                #filepath = "transcripts/dummy_script_30_min.txt"
+                filepath = "transcripts/dummy_script_30_min.txt"
                 #filepath = "transcripts/couple_Dummy_dialogue_pierre_lena.txt"
                 #filepath = "transcripts_prefabricated/Export text - 20250524105941recording.wav (25_05_2025).txt"
-                filepath = "transcripts_prefabricated/dummy_generic_romeo_julgit remote add origin https://github.com/gisburn1999/togetherness_conversional_ai.gitiet_30min.txt"
+                #filepath = "transcripts_prefabricated/dummy_generic_romeo_juliet_30min.txt"
 
                 save.get_or_insert_recording(filepath)
                 app.load_existing_recording(filepath)

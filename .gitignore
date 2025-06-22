@@ -1,0 +1,11 @@
+# created by virtualenv automatically
+
+transcripts/*.env
+
+
+
+
+
+test_env.py
+
+recordings.db

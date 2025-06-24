@@ -49,6 +49,7 @@ class DatabaseManager:
                 model TEXT,
                 temp FLOAT,
                 analysis_file TEXT,
+                overall_summary TEXT,            -- NEW COLUMN
                 analysis_path TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (recording_id) REFERENCES recordings(recording_id)
@@ -269,14 +270,14 @@ class DatabaseManager:
         conn.close()
 
 
-    def save_analysis(self , recording_id , analysis_type , model , temp , analysis_file, token):
+    def save_analysis(self , recording_id , analysis_type , model , temp , analysis_file, token, overall_summary):
         conn = self.connect()
         cursor = conn.cursor()
         cursor.execute(
             """
-            INSERT INTO ai_analysis (recording_id, analysis_type, model, temp, analysis_file, tokens_used)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """ , (recording_id , analysis_type , model , temp , analysis_file, token)
+            INSERT INTO ai_analysis (recording_id, analysis_type, model, temp, analysis_file, tokens_used, overall_summary)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """ , (recording_id , analysis_type , model , temp , analysis_file, token, overall_summary)
             )
         conn.commit()
         conn.close()
@@ -384,7 +385,7 @@ class DatabaseManager:
         cursor.execute(
             """
             SELECT tone, style, language_level, audience_fit, emotional_intensity, recommendation_style
-            FROM speaker_profiles
+            FROM speaker_profile_analysis
             WHERE recording_id = ?
             ORDER BY created_at DESC
             LIMIT 1

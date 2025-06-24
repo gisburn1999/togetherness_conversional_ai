@@ -17,7 +17,8 @@ def main_menue():
           "5. GROQ Test\n"
           "q for quit\n"
           "\nInterim Helper menue:\n"
-          "#i1. list all names in the conversation\n"
+          "t1. evaluate_analysis_with_groq\n"
+          
           "6. Load a transcript HARDCODED\n"
           "7. Analyse the speaker with GPT 4 MINI\n"
           "8. Print the actual recording\n"
@@ -48,16 +49,21 @@ def main_menue():
                 db = DatabaseManager()
                 existing_profiles = db.load_speaker_entries(app.record_id)
 
-                if existing_profiles:
-                    print("✅ Loaded existing speaker profiles from DB:")
-                    print(existing_profiles)
-                    # Here you can pass existing_profiles to your UI or processing logic
-                else:
+                # Run Step 1 only if we don’t have profiles yet
+                if not existing_profiles:
                     if app.transcript_text:
                         ai = Ai_Analyse(record_id=app.record_id , content=app.transcript_text)
                         ai.analyze_speaker_profile_and_save_entries()
+                        existing_profiles = db.load_speaker_entries(app.record_id)  # Reload after save
                     else:
-                        print("No transcript available. Please record or load a file first.")
+                        print("❌ No transcript available. Please record or load a file first.")
+                        return  # Early exit
+
+                # At this point, existing_profiles must be present
+                if existing_profiles:
+                    ai = Ai_Analyse(record_id=app.record_id , content=app.transcript_text)
+                    #ai.analysis_global_adaptive()  # ✅ Step 2a – text summary with tone
+                    ai.analyze_relationship_dynamics() # ✅ Step 2b – structured profile JSON
 
             case "5":
                 if app.transcript_text:
@@ -66,8 +72,14 @@ def main_menue():
                 else:
                     print("No transcript available. Please record or load a file first.")
 
-            case "i1":
-                pass
+            case "t1":
+                #print("Your credit balance is too low to use Claude")
+                if app.transcript_text:
+                    ai = Ai_Analyse(record_id=app.record_id , content=app.transcript_text)
+                    ai.evaluate_analysis_with_groq()
+                else:
+                    print("No transcript available. Please record or load a file first.")
+
             case "6":
                 #filepath = "transcripts/triangle_of_sadness_dinner_date_scene.txt"
                 filepath = "transcripts/dummy_script_30_min.txt"

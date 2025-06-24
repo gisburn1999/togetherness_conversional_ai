@@ -43,15 +43,22 @@ def main_menue():
                     ai.analysis_global_first_try()
                 else:
                     print("Transcript not available.")
-                #app.analysis_global_first_try()
-        #
-            case "4": #2step analyse
-                if app.transcript_text:
-                    ai = Ai_Analyse(record_id=app.record_id , content=app.transcript_text)
-                    #ai.analyze_speaker_profile() #old analyse def
-                    ai.analyze_speaker_profile_and_save_entries() #new improved version
+
+            case "4":
+                db = DatabaseManager()
+                existing_profiles = db.load_speaker_entries(app.record_id)
+
+                if existing_profiles:
+                    print("✅ Loaded existing speaker profiles from DB:")
+                    print(existing_profiles)
+                    # Here you can pass existing_profiles to your UI or processing logic
                 else:
-                    print("No transcript available. Please record or load a file first.")
+                    if app.transcript_text:
+                        ai = Ai_Analyse(record_id=app.record_id , content=app.transcript_text)
+                        ai.analyze_speaker_profile_and_save_entries()
+                    else:
+                        print("No transcript available. Please record or load a file first.")
+
             case "5":
                 if app.transcript_text:
                     ai = Ai_Analyse(record_id=app.record_id , content=app.transcript_text)
@@ -62,6 +69,7 @@ def main_menue():
             case "i1":
                 pass
             case "6":
+                #filepath = "transcripts/triangle_of_sadness_dinner_date_scene.txt"
                 filepath = "transcripts/dummy_script_30_min.txt"
                 #filepath = "transcripts/couple_Dummy_dialogue_pierre_lena.txt"
                 #filepath = "transcripts_prefabricated/Export text - 20250524105941recording.wav (25_05_2025).txt"

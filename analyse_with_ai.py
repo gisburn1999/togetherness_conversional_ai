@@ -351,67 +351,50 @@ class Ai_Analyse():
             {
                 "role":    "user" ,
                 "content": (
-    "You are an AI that analyzes couple conversations.\n\n"
-    
-    "Your task is to identify each speaker’s tone, style, language level, audience fit, emotional intensity, and recommended communication style.\n\n"
-    
-    "➡️ If the conversation uses names (e.g., “Alex:”), extract and use them. Otherwise, default to 'Speaker A' and 'Speaker B'. "
-    "If you’re unsure about a name, format like: 'Speaker A (possibly Jana)'.\n\n"
-    
-    "🚫 Do not explain your analysis. Do not use full sentences. Just output the final result as clean JSON.\n\n"
-    
-    "✅ Return only the following JSON structure **exactly**, raw JSON only, without markdown or formatting. with no additional text before or after:\n"
-    
-    "```json\n"
-    "{\n"
-    "  \"speakers\": {\n"
-    "    \"Speaker A\": {\n"
-    "      \"tone\": \"...\",\n"
-    "      \"style\": \"...\",\n"
-    "      \"language_level\": \"...\",\n"
-    "      \"audience_fit\": \"...\",\n"
-    "      \"emotional_intensity\": \"...\",\n"
-    "      \"recommendation_style\": \"...\"\n"
-    "    },\n"
-    "    \"Speaker B\": {\n"
-    "      \"tone\": \"...\",\n"
-    "      \"style\": \"...\",\n"
-    "      \"language_level\": \"...\",\n"
-    "      \"audience_fit\": \"...\",\n"
-    "      \"emotional_intensity\": \"...\",\n"
-    "      \"recommendation_style\": \"...\"\n"
-    "    }\n"
-    "  }\n"
-    "}\n"
-    "```\n\n"
-
-    "Conversation transcript:\n"
-)
-
-
+                    "Analyze each speaker's tone, style, emotional intensity, language level, audience fit, and recommendation style.\n\n"
+                    "Also determine the speaker's **role** in the conversation group — such as 'partner', 'friend', 'observer', 'counselor', or just their funtion, like 'waiter' etc.\n\n"
+                    "If the dialogue uses names (e.g., “Alex:”), extract and use them. Otherwise use 'Speaker A', 'Speaker B', etc. "
+                    "If you think you understood a name but are unsure, format it like: 'Speaker A (possibly Jana)'.\n\n"
+                    "✅ Return only the following JSON structure **exactly**, raw JSON only, without markdown or formatting or extra commentary.:\n\n"
+                    "{\n"
+                    "  \"speakers\": {\n"
+                    "    \"Speaker A\": {\n"
+                    "      \"tone\": \"...\",\n"
+                    "      \"style\": \"...\",\n"
+                    "      \"language_level\": \"...\",\n"
+                    "      \"audience_fit\": \"...\",\n"
+                    "      \"emotional_intensity\": \"...\",\n"
+                    "      \"recommendation_style\": \"...\",\n"
+                    "      \"group_role\": \"...\"\n"
+                    "    },\n"
+                    "    \"Speaker B\": { ... }\n"
+                    "  }\n"
+                    "}\n\n"
+                    "Conversation transcript:\n"
+                    )
             } ,
-            {
+                {
                 "role":    "user" ,
                 "content": self.content
-            }
-        ]
+                }
+                    ]
 
         response = open_ai_client.chat.completions.create(
             model=self.model_open_ai ,
             messages=messages ,
             temperature=temp ,
-            max_tokens=500 ,
+            max_tokens=600 ,
         )
 
         profile_text = response.choices[0].message.content
 
-        # 👇 Print raw output before parsing
-        print("🔎 RAW RESPONSE FROM OPENAI:\n" , profile_text)
+
 
         try:
             profile_data = json.loads(profile_text)
             speakers = profile_data.get("speakers" , {})
-            print("✅ Parsed speakers:\n" , speakers)
+            print(f"in analys Speakes var {speakers}")
+
         except json.JSONDecodeError as e:
             print("❌ Failed to parse JSON from response.")
             print("📛 Error:" , e)

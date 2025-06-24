@@ -1,8 +1,7 @@
 import json
 import sqlite3
 import os
-
-
+from datetime import datetime
 
 
 class DatabaseManager:
@@ -66,114 +65,47 @@ class DatabaseManager:
             );
         """)
 
-        #speaker_profile table
-
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS speaker_profiles (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                recording_id INTEGER NOT NULL,
-                conversation_tone TEXT,
-                speaker_styles TEXT, -- store JSON string
-                emotional_intensity_score INTEGER,
-                language_complexity TEXT,
-                style_tags TEXT, -- store JSON string
-                overall_temperature REAL,
-                max_token_recommendation INTEGER,
-                raw_json TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-            """)
-
         # speaker profile table v2
         cursor.execute("""
-            CREATE TABLE IF NOT EXISTS speaker_profile_entries (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            recording_id INTEGER NOT NULL,
-            speaker_name TEXT NOT NULL,
-            tone TEXT,
-            style TEXT,
-            language_level TEXT,
-            audience_fit TEXT,
-            emotional_intensity TEXT,
-            recommendation_style TEXT,
-            raw_json TEXT, -- optional backup
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        """)
+            CREATE TABLE IF NOT EXISTS speaker_profile_analysis (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                recording_id INTEGER NOT NULL,
+                speaker_name TEXT NOT NULL,           -- "Speaker A", or real name like "Jana"
+                group_role TEXT,                      -- "partner", "friend", "counselor", etc.
+                tone TEXT,
+                style TEXT,
+                language_level TEXT,
+                audience_fit TEXT,
+                emotional_intensity TEXT,
+                recommendation_style TEXT,
+                raw_json TEXT,                        -- full dump for debugging/versioning
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+             """)
+
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
 
 
-    def analyze_speaker_profile_and_save_entries(self , temp=0.7):
-        db = DatabaseManager()
+    def save_speaker_entries(self , recording_id: int , speakers: dict):
+        """
+        speakers is the dict with keys 'Speaker A', 'Speaker B', ...
+        """
+        #print(f"🔔 save_speaker_entries called at now")
 
-        messages = [
-            {
-                "role":    "system" ,
-                "content": (
-                    "You are an AI trained to profile speakers based on their communication style in couple dialogues. "
-                    "You return a structured JSON with separate speaker entries."
-                )
-            } ,
-            {
-                "role":    "user" ,
-                "content": (
-                    "Analyze each speaker's tone, style, emotional intensity, language level, audience fit, and "
-                    "recommendation style for approaching them.\n\n"
-                    "If the dialogue uses names (e.g., “Alex:”), extract and use them. Otherwise use 'Speaker A' and 'Speaker B'. "
-                    "If you think you understood a name but are unsure, format it like: 'Speaker A (possibly Jana)'.\n\n"
-                    "Return only JSON like this:\n\n"
-                    "{\n"
-                    "  \"speakers\": {\n"
-                    "    \"Speaker A\": {\n"
-                    "      \"tone\": \"...\",\n"
-                    "      \"style\": \"...\",\n"
-                    "      \"language_level\": \"...\",\n"
-                    "      \"audience_fit\": \"...\",\n"
-                    "      \"emotional_intensity\": \"...\",\n"
-                    "      \"recommendation_style\": \"...\"\n"
-                    "    },\n"
-                    "    \"Speaker B\": { ... }\n"
-                    "  }\n"
-                    "}\n\n"
-                    "Conversation transcript:\n"
-                )
-            } ,
-            {
-                "role":    "user" ,
-                "content": self.content
-            }
-        ]
-
-        response = open_ai_client.chat.completions.create(
-            model=self.model_open_ai ,
-            messages=messages ,
-            temperature=temp ,
-            max_tokens=500 ,
-        )
-
-        try:
-            profile_data = json.loads(response.choices[0].message.content)
-            speakers = profile_data.get("speakers" , {})
-        except json.JSONDecodeError:
-            print("❌ Failed to parse JSON from response.")
-            return
-
-        # Save to new table
-        db.save_speaker_entries(self.record_id , speakers)
-
-        print(f"✅ Saved {len(speakers)} speaker profiles for recording {self.record_id}.")
-
-
-
-    def save_speaker_entries(self , recording_id , speakers_dict):
-        conn = self.connect()
+        conn = self.connect()  # Open connection once
         cursor = conn.cursor()
 
-        for name , profile in speakers_dict.items():
+        # speakers is already the dict, so no .get() needed here
+        print(speakers)
+
+        for speaker_name , data in speakers.items():
+            print(speaker_name)
             cursor.execute(
                 """
-                INSERT INTO speaker_profile_entries (
+                INSERT INTO speaker_profile_analysis (
                     recording_id,
                     speaker_name,
+                    group_role,
                     tone,
                     style,
                     language_level,
@@ -181,22 +113,43 @@ class DatabaseManager:
                     emotional_intensity,
                     recommendation_style,
                     raw_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """ , (
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """ ,
+                (
                     recording_id ,
-                    name ,
-                    profile.get("tone") ,
-                    profile.get("style") ,
-                    profile.get("language_level") ,
-                    profile.get("audience_fit") ,
-                    profile.get("emotional_intensity") ,
-                    profile.get("recommendation_style") ,
-                    json.dumps(profile)  # backup mini JSON
+                    speaker_name ,
+                    data.get("group_role") ,
+                    data.get("tone") ,
+                    data.get("style") ,
+                    data.get("language_level") ,
+                    data.get("audience_fit") ,
+                    data.get("emotional_intensity") ,
+                    data.get("recommendation_style") ,
+                    json.dumps(data)
                 )
             )
 
         conn.commit()
         conn.close()
+
+
+    def load_speaker_entries(self , recording_id: int) -> dict:
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT speaker_name, raw_json FROM speaker_profile_analysis WHERE recording_id = ?" ,
+            (recording_id ,)
+        )
+        rows = cursor.fetchall()
+        conn.close()
+
+        if not rows:
+            return {}
+
+        speakers = {}
+        for speaker_name , raw_json in rows:
+            speakers[speaker_name] = json.loads(raw_json)
+        return speakers
 
 
     def get_or_insert_recording(self , filepath):
@@ -359,7 +312,7 @@ class DatabaseManager:
 
         cursor.execute(
             """
-            INSERT INTO speaker_profiles (
+            INSERT INTO speaker_profile_analysis (
                 recording_id,
                 conversation_tone,
                 speaker_styles,
@@ -448,6 +401,4 @@ class DatabaseManager:
                 "recommendation_style": row[5]
             }
         return None
-
-
 

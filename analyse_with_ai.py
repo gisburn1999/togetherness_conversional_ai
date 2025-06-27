@@ -23,6 +23,8 @@ class Ai_Analyse():
         self.content = content
         self.transcript_text = None
         self.model_open_ai = "gpt-4o-mini"
+        self.db = DatabaseManager()
+
 
     def load_from_voice_app(self, voice_app):
         self.record_id = voice_app.record_id
@@ -123,7 +125,73 @@ class Ai_Analyse():
         )
 
 
-    def analysis_global_first_try(self, temp = 0.8):
+    def analysis_global_first_try(self , temp=0.8):
+        db = DatabaseManager()
+
+        # Step 1: Create the prompt
+        messages = [
+            {"role":    "system" ,
+             "content": "You are an AI trained to analyze couple dialogues from natural conversations."} ,
+            {"role": "user" , "content": (
+                "Here is a conversation transcript between two people. "
+                "Please analyze and output in this exact format, replacing Speaker A and Speaker B with actual names if mentioned in the transcript. "
+                "If no names are found, use Speaker A and Speaker B.\n\n"
+                "Speaker A Problems (or [Name]):\n"
+                "- List the main emotional or communication problems this person shows.\n\n"
+                "Speaker B Problems (or [Name]):\n"
+                "- List the main emotional or communication problems this person shows.\n\n"
+                "Shared Problems:\n"
+                "- List problems that affect both or their relationship.\n\n"
+                "Conclusions & Explanation:\n"
+                "- Summarize what is happening beneath the surface and what could help resolve their conflict.\n\n"
+                "Overall Summary:\n"
+                "- Provide a concise one-line psychological summary that encapsulates the overall emotional state and relationship dynamics.\n\n"
+                "Please keep your answer concise but detailed enough for understanding.\n\n"
+                "**Do not use any markdown formatting (like bold or asterisks).**"
+                "Transcript:\n"
+            )} ,
+            {"role": "user" , "content": self.content}
+        ]
+
+        # Step 2: Get response from OpenAI
+        response = open_ai_client.chat.completions.create(
+            model=self.model_open_ai ,
+            messages=messages ,
+            temperature=temp ,
+            max_tokens=600
+        )
+
+        full_text = response.choices[0].message.content
+        tokens_used = response.usage.total_tokens
+
+        # Step 3: Extract overall summary and analysis text
+        overall_summary = ""
+        analysis_text = full_text
+
+        if "Overall Summary:" in full_text:
+            parts = full_text.split("Overall Summary:")
+            analysis_text = parts[0].strip()
+            summary_lines = parts[1].strip().split("\n")
+            if summary_lines:
+                overall_summary = summary_lines[0].strip()
+
+        # Step 4: Save to DB
+        db.save_analysis(
+            recording_id=self.record_id ,
+            analysis_type="global_adaptive_analysis" ,
+            model=self.model_open_ai ,
+            temp=temp ,
+            analysis_file=analysis_text ,
+            overall_summary=overall_summary ,
+            token=tokens_used
+        )
+
+        # Step 5: Debug output
+        print("\n🧠 Global Adaptive Analysis:\n")
+        print(full_text)
+
+
+    def analysis_global_first_try_(self, temp = 0.8):
         db = DatabaseManager()
         response = open_ai_client.chat.completions.create(
         model = self.model_open_ai ,
@@ -142,6 +210,8 @@ class Ai_Analyse():
                 "- List problems that affect both or their relationship.\n\n"
                 "Conclusions & Explanation:\n"
                 "- Summarize what is happening beneath the surface and what could help resolve their conflict.\n\n"
+                "Overall Summary:\n"
+                "- Provide a concise one-line psychological summary that encapsulates the overall emotional state and relationship dynamics.\n\n"
                 "Please keep your answer concise but detailed enough for understanding.\n\n"
                 "Transcript:\n"
             )} ,
@@ -222,8 +292,10 @@ class Ai_Analyse():
         print("Generated text:\n" , response.content[0].text)
 
 
-    #in progess
-    def evaluate_analysis_with_groq(self , analysis_text: str , groq_model="mixtral-8x7b-32768" , groq_heat=0.3):
+
+
+    def evaluate_analysis_with_groq(self , analysis_text: str , groq_model="llama3-70b-8192" , groq_heat=0.3):
+
         """
         Uses Groq's OpenAI-compatible API to evaluate a given relationship analysis based on psychological and emotional quality.
 
@@ -245,26 +317,59 @@ class Ai_Analyse():
         )
 
         prompt = f"""
-    Please evaluate the following relationship analysis based on the following criteria:
-    - Depth of psychological insight (0–10)
-    - Emotional nuance (0–10)
-    - Clarity and usefulness (0–10)
-    - Empathy (0–10)
-    - Overall score (0–40)
+        Please evaluate the following relationship analysis based on the following criteria - but be hypercritical -
+        as you are an expert in relationship psychology and conversational AI analysis.
+        Your task is to evaluate the following analysis of a couple's conversation and rate it on four key dimensions. Use the definitions and scoring anchors below. Return a JSON object with scores from 1–10, and a calculated total_score and split_up_index (0–10). Be consistent and evidence-based.
 
-    Respond in strict JSON:
-    {{
-      "psychological_insight": 9,
-      "emotional_nuance": 8,
-      "clarity_usefulness": 9,
-      "empathy": 8,
-      "total_score": 34
-    }}
+        ### Dimensions & Scoring Guide
 
-    Analysis to evaluate:
-    \"\"\"
-    {analysis_text}
-    \"\"\"
+        1. **psychological_insight**  
+        - 10: Expert-level psychological concepts (e.g., attachment theory, projection, defensiveness), correctly applied  
+        - 7–9: Solid understanding of human behavior with some theoretical backing  
+        - 4–6: General emotional insight, limited depth  
+        - 1–3: Surface-level interpretation, no psychological grounding
+
+        2. **emotional_nuance**  
+        - 10: Captures subtle shifts in tone, emotion, defensiveness, and vulnerability  
+        - 7–9: Good awareness of affect and mood changes  
+        - 4–6: Emotionally flat or overly general  
+        - 1–3: Misses key emotional tones or misreads intent
+
+        3. **clarity_usefulness**  
+        - 10: Clear, actionable advice or interpretation anyone could understand  
+        - 7–9: Mostly clear and usable  
+        - 4–6: Somewhat vague or abstract  
+        - 1–3: Confusing, jargon-heavy, or impractical
+
+        4. **empathy**  
+        - 10: Deeply compassionate and fair to both parties  
+        - 7–9: Generally empathetic and balanced  
+        - 4–6: Slight bias or missed emotional context  
+        - 1–3: Harsh, judgmental, or cold
+
+        ### split_up_index
+        - Rate from 0 (very healthy interaction) to 10 (very high risk of relationship breakdown)
+        - Base this on the relationship analysis
+
+        ---
+
+        ### INPUT ANALYSIS:
+
+        {analysis_text}
+
+        ---
+
+        ### JSON Output Format:
+        {{
+          "psychological_insight": int,
+          "emotional_nuance": int,
+          "clarity_usefulness": int,
+          "empathy": int,
+          "total_score": int,
+          "split_up_index": int
+        }}
+
+        Respond ONLY with the JSON - no text no markdown.
     """.strip()
 
         response = groq_client.chat.completions.create(
@@ -287,6 +392,54 @@ class Ai_Analyse():
         except json.JSONDecodeError:
             print("⚠️ JSON decoding failed. Check the returned content.")
             return {"error": "Invalid JSON format returned from Groq" , "raw_output": content}
+
+
+    def rate_analysis_by_id(self , analysis_id):
+        # Load the analysis text from DB using your load method
+        record = self.db.load_analysis_from_db(analysis_id)
+        if record is None:
+            raise ValueError(f"No analysis found for id {analysis_id}")
+
+        recording_id , _id , analysis_text = record
+
+        # Evaluate the analysis text
+        rating = self.evaluate_analysis_with_groq(analysis_text)
+
+        # Save the rating JSON string back to DB
+        import json
+        rating_json = json.dumps(rating)
+        self.db.save_rating_to_ai_analysis(analysis_id , rating_json)
+
+        return rating
+
+
+    def process_and_rate_analysis(self , analysis_text , overall_summary , temp , tokens_used):
+        # 1. Save the analysis to the database
+        analysis_id = self.db.save_analysis(
+            recording_id=self.record_id ,
+            analysis_type="global_adaptive_analysis" ,
+            model=self.model_open_ai ,
+            temp=temp ,
+            analysis_file=analysis_text ,
+            overall_summary=overall_summary ,
+            token=tokens_used
+        )
+
+        # 2. Evaluate the analysis (e.g., with Groq model or any scoring engine)
+        rating = self.evaluate_analysis_with_groq(
+            recording_id=self.record_id ,
+            analysis_id=analysis_id ,
+            content=analysis_text
+        )
+
+        # 3. Save the rating result back to the database
+        self.db.save_rating_to_ai_analysis(
+            analysis_id ,
+            rating.get_rating_json()
+        )
+
+        # Optionally return the rating or analysis_id for downstream use
+        return analysis_id , rating
 
 
     def basic_groq_analysing(self, groq_model = "llama-3.3-70b-versatile", groq_heat = 0.8):
@@ -471,11 +624,12 @@ class Ai_Analyse():
         if "Overall Summary:" in text:
             parts = text.split("Overall Summary:")
             analysis_text = parts[0].strip()
-            overall_summary = parts[1].strip().split("\n")[0]  # first line after Overall Summary:
+            overall_summary = parts[1].strip().split("\n")[0]
         else:
             analysis_text = text
 
-        db.save_analysis(
+        # ✅ Save and capture analysis_id
+        analysis_id = self.db.save_analysis(
             recording_id=self.record_id ,
             analysis_type="global_adaptive_analysis" ,
             model=self.model_open_ai ,
@@ -484,9 +638,8 @@ class Ai_Analyse():
             overall_summary=overall_summary ,
             token=tokens_used
         )
-
-        print("\n🧠 Global Adaptive Analysis:\n")
-        print(text)
+        print(F"DEBUG in function: {analysis_id}")
+        return analysis_id
 
 
     def analyze_relationship_dynamics(self , speaker_profiles: dict = None , temp: float = 0.65 ,
@@ -620,10 +773,6 @@ class Ai_Analyse():
         print(text)
 
 
-        """except Exception as e:
-            print("🔥 Error calling OpenAI API:" , e)
-            return {}"""
-
 
     def analyze_speaker_profile(self , temp=0.7):
         db = DatabaseManager()
@@ -688,20 +837,4 @@ class Ai_Analyse():
             print("⚠️ Failed to parse JSON. Raw response:")
             print(profile_text)
             profile_data = {}
-
-        # Save into updated DB schema
-        db.save_speaker_profile(
-            recording_id=self.record_id ,
-            conversation_tone=None ,  # optional to fill in later
-            speaker_styles=json.dumps(profile_data.get("speakers")) ,
-            emotional_intensity_score=None ,
-            language_complexity=None ,
-            style_tags=None ,
-            overall_temperature=None ,
-            max_token_recommendation=None ,
-            raw_json=json.dumps(profile_data) ,
-        )
-
-        print("✅ Speaker profile saved for recording" , self.record_id)
-
 

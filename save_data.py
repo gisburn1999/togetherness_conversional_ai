@@ -3,7 +3,6 @@ import sqlite3
 import os
 from datetime import datetime
 
-
 class DatabaseManager:
     def __init__(self , db_path="recordings.db"):
 
@@ -50,6 +49,7 @@ class DatabaseManager:
                 temp FLOAT,
                 analysis_file TEXT,
                 overall_summary TEXT,            -- NEW COLUMN
+                rating_data JSON,
                 analysis_path TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (recording_id) REFERENCES recordings(recording_id)
@@ -247,40 +247,50 @@ class DatabaseManager:
 
 
     def save_recording(self, timestamp, folder, sound_file, transcript_file=None, analysis_file=None, transcript=None, length=None):
-        conn = self.connect()
-        cursor = conn.cursor()
-        cursor.execute("""
-            INSERT INTO recordings (timestamp, folder, sound_file, transcript_file, analysis_file, transcript, length)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (timestamp, folder, sound_file, transcript_file, analysis_file, transcript, length))
-        conn.commit()
-        record_id = cursor.lastrowid
-        conn.close()
-        return record_id
+        try:
+            conn = self.connect()
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO recordings (timestamp, folder, sound_file, transcript_file, analysis_file, transcript, length)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (timestamp, folder, sound_file, transcript_file, analysis_file, transcript, length))
+            conn.commit()
+            record_id = cursor.lastrowid
+            conn.close()
+            return record_id
+        except Exception as e:
+            print(f"[ERROR] Could not save recording: {e}")
 
     def update_transcript(self, recording_id, transcript_file, transcript):
-        conn = self.connect()
-        cursor = conn.cursor()
-        cursor.execute("""
-            UPDATE recordings
-            SET transcript_file = ?, transcript = ?
-            WHERE recording_id = ?
-        """, (transcript_file, transcript, recording_id))
-        conn.commit()
-        conn.close()
-
+        try:
+            conn = self.connect()
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE recordings
+                SET transcript_file = ?, transcript = ?
+                WHERE recording_id = ?
+            """, (transcript_file, transcript, recording_id))
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            print(f"[ERROR] Could not update Transcript: {e}")
 
     def save_analysis(self , recording_id , analysis_type , model , temp , analysis_file, token, overall_summary):
-        conn = self.connect()
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            INSERT INTO ai_analysis (recording_id, analysis_type, model, temp, analysis_file, tokens_used, overall_summary)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """ , (recording_id , analysis_type , model , temp , analysis_file, token, overall_summary)
-            )
-        conn.commit()
-        conn.close()
+        try:
+            conn = self.connect()
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO ai_analysis (recording_id, analysis_type, model, temp, analysis_file, tokens_used, overall_summary)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """ , (recording_id , analysis_type , model , temp , analysis_file, token, overall_summary)
+                )
+            analysis_id = cursor.lastrowid
+            conn.commit()
+            conn.close()
+            return analysis_id
+        except Exception as e:
+            print(f"[ERROR] Could not save analysis: {e}")
 
 
     def save_speaker_profile(
@@ -403,3 +413,26 @@ class DatabaseManager:
             }
         return None
 
+
+    def load_analysis_from_db(self , analysis_id):
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT recording_id, analysis_id, analysis_file FROM ai_analysis WHERE analysis_id = ?" , (analysis_id ,))
+            row = cursor.fetchone()
+            if row:
+                return row  # tuple: (recording_id, analysis_id, content)
+            return None
+        except Exception as e:
+            print(f"[ERROR] Could not load analysis: {e}")
+
+
+    def save_rating_to_ai_analysis(self , analysis_id , rating_json):
+        try:
+            cursor = self.conn.cursor()
+            sql = "UPDATE ai_analysis SET rating_data = ? WHERE analysis_id = ?"
+            cursor.execute(sql , (rating_json , analysis_id))
+            self.conn.commit()
+        except Exception as e:
+            print(f"[ERROR] Could not save rating: {e}")
+
+f

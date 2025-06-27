@@ -435,4 +435,3 @@ class DatabaseManager:
         except Exception as e:
             print(f"[ERROR] Could not save rating: {e}")
 
-f

@@ -65,7 +65,11 @@ def main_menue():
                     ai = Ai_Analyse(record_id=app.record_id , content=app.transcript_text)
                     #ai.analysis_global_adaptive()  # ✅ Step 2a – text summary with tone
                     #ai.analyze_relationship_dynamics() # ✅ Step 2b – structured profile JSON
-                    analysis_id = ai.analysis_global_adaptive()
+
+                    analysis_id = ai.analysis_global_first_try()
+                    #analysis_id =  ai.analyze_relationship_dynamics() #this is on hold JSON output
+
+                    #analysis_id = ai.analysis_global_adaptive()
                     print(f"DEBUG: analysis_id = {analysis_id}")
                     rating = ai.rate_analysis_by_id(analysis_id)
                     print(rating)
@@ -91,8 +95,8 @@ def main_menue():
                 #filepath = "transcripts/dummy_script_30_min.txt"
                 #filepath = "transcripts/couple_Dummy_dialogue_pierre_lena.txt"
                 #filepath = "transcripts_prefabricated/Export text - 20250524105941recording.wav (25_05_2025).txt"
-                #filepath = "transcripts_prefabricated/dummy_generic_romeo_juliet_30min.txt"
-                filepath = "transcripts_prefabricated/Export text - 20250524105941recording.wav (25_05_2025) english.txt"
+                filepath = "transcripts_prefabricated/dummy_generic_romeo_juliet_30min.txt"
+                #filepath = "transcripts_prefabricated/Export text - 20250524105941recording.wav (25_05_2025) english.txt"
 
                 save.get_or_insert_recording(filepath)
                 app.load_existing_recording(filepath)

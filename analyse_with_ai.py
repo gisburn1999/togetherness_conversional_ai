@@ -99,7 +99,7 @@ class Ai_Analyse():
 
                         "**Solutions:**\n"
                         "- Suggest specific, actionable strategies to improve their communication or relationship.\n\n"
-
+                        
                         "Please keep your answer concise but detailed enough for understanding.\n\n"
                         "Transcript:\n"
                     )
@@ -176,9 +176,9 @@ class Ai_Analyse():
                 overall_summary = summary_lines[0].strip()
 
         # Step 4: Save to DB
-        db.save_analysis(
+        analysis_id = db.save_analysis(
             recording_id=self.record_id ,
-            analysis_type="global_adaptive_analysis" ,
+            analysis_type="analysis_global_first_try" ,
             model=self.model_open_ai ,
             temp=temp ,
             analysis_file=analysis_text ,
@@ -187,8 +187,9 @@ class Ai_Analyse():
         )
 
         # Step 5: Debug output
-        print("\n🧠 Global Adaptive Analysis:\n")
+        print("\n🧠 analysis_global_first_try:\n")
         print(full_text)
+        return analysis_id
 
 
     def analysis_global_first_try_(self, temp = 0.8):
@@ -583,16 +584,18 @@ class Ai_Analyse():
                 f"language level is '{profile['language_level']}', "
                 f"audience fit is '{profile['audience_fit']}', "
                 f"emotional intensity is '{profile['emotional_intensity']}', "
-                f"and the recommended feedback style is '{profile['recommendation_style']}'.\n\n"
-            )
+                f"and the recommended feedback style is '{profile['recommendation_style']}', "
+                f"adapt your answer to the speaker profile style. \n\n"
 
+            )
+        print(f"Speaker profile in the analysis {profile_summary}")
         messages = [
             {"role":    "system" ,
              "content": "You are an AI trained to analyze couple dialogues from natural conversations."} ,
             {"role": "user" , "content": (
                 "Here is a conversation transcript between two people.\n"
                 "Please analyze and output in this exact format, replacing Speaker A and Speaker B with actual names if mentioned.\n"
-                "If no names found, use Speaker A and Speaker B.\n\n"
+                "If no names found, just use Speaker A and Speaker B.\n\n"
                 f"{profile_summary}"
                 "Speaker A Problems (or [Name]):\n"
                 "- List the main emotional or communication problems this person shows.\n\n"
@@ -641,8 +644,83 @@ class Ai_Analyse():
         print(F"DEBUG in function: {analysis_id}")
         return analysis_id
 
-
     def analyze_relationship_dynamics(self , speaker_profiles: dict = None , temp: float = 0.65 ,
+                                      max_tokens: int = 500):
+        import json
+
+        db = DatabaseManager()
+        if speaker_profiles is None:
+            speaker_profiles = db.load_speaker_entries(self.record_id)
+            if not speaker_profiles:
+                print("❌ No speaker profiles found to analyze.")
+                return {}
+
+        prompt_prefix = (
+            "You are an expert in relationship psychology and conversational dynamics.\n\n"
+            "Given the following speaker communication profiles, generate a relationship-focused analysis for EACH speaker.\n\n"
+            "For each speaker, output:\n"
+            "- relationship_mindset: a short phrase describing their likely mindset or emotional position\n"
+            "- core_needs: 2–3 needs this person is likely expressing or lacking\n"
+            "- communication_risks: what could go wrong in a conversation with them\n"
+            "- recommendation: how to best approach or respond to this person\n\n"
+            "Use clear, concise language.\n\n"
+            "Input:\n"
+        )
+
+        formatted_json = json.dumps({"speakers": speaker_profiles} , indent=2)
+        #print(f"in 2b function {formatted_json}")
+        full_prompt = prompt_prefix + formatted_json + "\n\nOutput format:\n" + json.dumps(
+            {
+                "Speaker A": {
+                    "relationship_mindset": "..." ,
+                    "core_needs":           "..." ,
+                    "communication_risks":  "..." ,
+                    "recommendation":       "..."
+                } ,
+                "Speaker B": {
+                    "relationship_mindset": "..." ,
+                    "core_needs":           "..." ,
+                    "communication_risks":  "..." ,
+                    "recommendation":       "..."
+                }
+            } ,
+            indent=2
+        )
+
+        messages = [
+            {"role":    "system" ,
+             "content": "You are a helpful assistant that analyzes communication in relationships."} ,
+            {"role": "user" , "content": full_prompt}
+        ]
+
+        response = open_ai_client.chat.completions.create(
+            model=self.model_open_ai ,
+            messages=messages ,
+            temperature=temp ,
+            max_tokens=max_tokens ,
+        )
+
+        output_text = response.choices[0].message.content
+        tokens_used = response.usage.total_tokens
+        analysis_file = output_text
+
+
+
+        # ✅ Save and capture analysis_id
+        analysis_id = db.save_analysis(
+            recording_id=self.record_id ,
+            analysis_type="analyze_relationship_dynamics" ,  # Change if needed
+            model=self.model_open_ai ,
+            temp=temp ,
+            analysis_file=output_text ,
+            overall_summary=overall_summary ,
+            token=tokens_used
+        )
+        print(f"DEBUG in analyze_relationship_dynamics: {analysis_id}")
+        return analysis_id
+
+
+    def analyze_relationship_dynamics_json(self , speaker_profiles: dict = None , temp: float = 0.65 ,
                                       max_tokens: int = 500):
         import json
 
